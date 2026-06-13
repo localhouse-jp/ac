@@ -42,21 +42,24 @@ pio device monitor                        # シリアルで IP を確認
 ESP が MQTT discovery を publish し、HA が `climate.toshiba_ac` を自動生成する。
 Apple Home へは HA の **HomeKit Bridge** で公開する（ESP 側の追加実装は不要）。
 
-1. **Mosquitto**: HA → Settings → Add-ons → Store →「Mosquitto broker」を Install/Start。
-   ユーザを作成し、`src/secrets.h` の `MQTT_HOST/PORT/USER/PASS` に記入して再書き込み。
+1. **Mosquitto**: ブローカーにユーザを作成（`mosquitto_passwd` 等）し、
+   `src/secrets.h` の `MQTT_HOST/PORT/USER/PASS` に記入して再書き込み。
+   `MQTT_HOST` は **`xxx.local`（mDNS）でも IP でも可**（`.local` は ESP が `MDNS.queryHost` で解決）。
 2. **MQTT 統合**: HA → Devices & Services → Add → MQTT（discovery 有効、prefix `homeassistant`）。
-3. ESP 起動 → `climate.toshiba_ac` が自動生成される。
+3. ESP 起動 → `climate.aircon` が自動生成される。
 4. **Apple Home**: HA → Add → HomeKit。include に `climate` を含め、iOS「ホーム」でコードをスキャン。
    - 注: Apple Home は cool/heat/auto/off のみ。`dry`/`fan_only` は HA/Web からのみ操作可。
 
-トピック: state `toshiba_ac/ac/state` / command `toshiba_ac/ac/set` / availability `toshiba_ac/availability`。
+トピック: state `aircon/state` / command `aircon/set` / availability(LWT) `aircon/availability` /
+discovery `homeassistant/climate/aircon/config`。
 動作確認:
 ```sh
-mosquitto_sub -h <HA_IP> -u <user> -P <pass> -v -t 'toshiba_ac/#'
-mosquitto_pub -h <HA_IP> -u <user> -P <pass> -t toshiba_ac/ac/set -m '{"temp":27}'
+mosquitto_sub -h <broker> -u <user> -P <pass> -v -t 'aircon/#'
+mosquitto_pub -h <broker> -u <user> -P <pass> -t aircon/set -m '{"temp":27}'
 ```
 
 > MQTT 未設定（ブローカー未到達）でも Web/IR は通常どおり動作する（接続は 2 秒タイムアウト・15 秒間隔で非同期リトライ）。
+> ブローカーは ESP と**到達可能な同一ネットワーク**に置くこと（別 VLAN だと届かない）。
 
 ## 配線
 

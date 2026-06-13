@@ -1,5 +1,6 @@
 #include "AcMqtt.h"
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include "secrets.h"
@@ -11,26 +12,26 @@ AcState*     g_ac = nullptr;
 void (*g_onCmd)() = nullptr;
 uint32_t     lastTry = 0;
 
-const char* kNodeId    = "toshiba_ac";
-const char* kCmdTopic  = "toshiba_ac/ac/set";
-const char* kStTopic   = "toshiba_ac/ac/state";
-const char* kAvailTopic = "toshiba_ac/availability";
-const char* kDiscoTopic = "homeassistant/climate/toshiba_ac/config";
+const char* kNodeId    = "aircon";
+const char* kCmdTopic  = "aircon/set";
+const char* kStTopic   = "aircon/state";
+const char* kAvailTopic = "aircon/availability";
+const char* kDiscoTopic = "homeassistant/climate/aircon/config";
 
 // HA discovery (retained)。state/cmd は同一 topic に JSON、属性ごとに value/cmd template。
 const char kDiscovery[] PROGMEM = R"json({
-"name":"Toshiba AC","uniq_id":"toshiba_ac_climate",
-"avty_t":"toshiba_ac/availability","pl_avail":"online","pl_not_avail":"offline",
+"name":"Toshiba AC","uniq_id":"aircon_climate",
+"avty_t":"aircon/availability","pl_avail":"online","pl_not_avail":"offline",
 "modes":["off","cool","dry","fan_only","heat","auto"],
-"mode_stat_t":"toshiba_ac/ac/state","mode_stat_tpl":"{{ value_json.mode }}",
-"mode_cmd_t":"toshiba_ac/ac/set","mode_cmd_tpl":"{\"mode\":\"{{ value }}\"}",
+"mode_stat_t":"aircon/state","mode_stat_tpl":"{{ value_json.mode }}",
+"mode_cmd_t":"aircon/set","mode_cmd_tpl":"{\"mode\":\"{{ value }}\"}",
 "min_temp":16,"max_temp":30,"temp_step":0.5,
-"temp_stat_t":"toshiba_ac/ac/state","temp_stat_tpl":"{{ value_json.temp }}",
-"temp_cmd_t":"toshiba_ac/ac/set","temp_cmd_tpl":"{\"temp\":{{ value }}}",
+"temp_stat_t":"aircon/state","temp_stat_tpl":"{{ value_json.temp }}",
+"temp_cmd_t":"aircon/set","temp_cmd_tpl":"{\"temp\":{{ value }}}",
 "fan_modes":["auto","20","40","60","80","100"],
-"fan_mode_stat_t":"toshiba_ac/ac/state","fan_mode_stat_tpl":"{{ value_json.fan }}",
-"fan_mode_cmd_t":"toshiba_ac/ac/set","fan_mode_cmd_tpl":"{\"fan\":\"{{ value }}\"}",
-"dev":{"ids":["toshiba_ac"],"name":"Toshiba AC (Bosch144)","mf":"DIY","mdl":"ESP32-C3 IR Remote","sw":"1.0"}
+"fan_mode_stat_t":"aircon/state","fan_mode_stat_tpl":"{{ value_json.fan }}",
+"fan_mode_cmd_t":"aircon/set","fan_mode_cmd_tpl":"{\"fan\":\"{{ value }}\"}",
+"dev":{"ids":["aircon"],"name":"Toshiba AC (Bosch144)","mf":"DIY","mdl":"ESP32-C3 IR Remote","sw":"1.0"}
 })json";
 
 const uint16_t kFanSteps[] = {kBosch144Fan20, kBosch144Fan40, kBosch144Fan60,
@@ -105,6 +106,19 @@ void onMessage(char* topic, byte* payload, unsigned int len) {
   if (strcmp(topic, kCmdTopic) == 0) applyCommandJson(payload, len);
 }
 
+// MQTT_HOST が "xxx.local" なら mDNS で解決して setServer。それ以外は IP/DNS 名として設定。
+bool resolveServer() {
+  String h = MQTT_HOST;
+  if (h.endsWith(".local")) {
+    IPAddress ip = MDNS.queryHost(h.substring(0, h.length() - 6), 2000);
+    if (ip == IPAddress((uint32_t)0)) return false;  // 解決失敗 → 今回はスキップ
+    mqtt.setServer(ip, MQTT_PORT);
+  } else {
+    mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  }
+  return true;
+}
+
 void publishDiscovery() {
   char buf[1024];
   strncpy_P(buf, kDiscovery, sizeof(buf));
@@ -119,9 +133,8 @@ void begin(AcState* state, void (*onCommand)()) {
   g_ac = state;
   g_onCmd = onCommand;
   net.setTimeout(2);  // TCP接続タイムアウト2秒 (既定30秒。未到達時に loop を長くブロックさせない)
-  mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setBufferSize(1024);     // discovery JSON 用
-  mqtt.setCallback(onMessage);
+  mqtt.setCallback(onMessage);  // server は loop の resolveServer() で設定 (.local 対応)
 }
 
 void publishState() {
@@ -135,8 +148,9 @@ void loop() {
   if (mqtt.connected()) { mqtt.loop(); return; }
   if (WiFi.status() != WL_CONNECTED) return;
   uint32_t now = millis();
-  if (now - lastTry < 15000) return;  // 失敗時は15秒間隔 (未接続時のWeb stall を最小化)
-  lastTry = now;
+  if (lastTry && now - lastTry < 15000) return;  // 初回は即時、以降は15秒間隔
+  lastTry = now ? now : 1;
+  if (!resolveServer()) return;       // .local の mDNS 解決 (失敗時は次回再試行)
   if (mqtt.connect(kNodeId, MQTT_USER, MQTT_PASS, kAvailTopic, 0, true, "offline")) {
     mqtt.publish(kAvailTopic, "online", true);
     mqtt.subscribe(kCmdTopic);
