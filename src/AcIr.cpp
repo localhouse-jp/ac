@@ -13,7 +13,6 @@ IRBosch144AC encoder(0);  // バイト列構築専用 (RMT で送るので GPIO 
 IRBosch144AC parser(0);   // 受信デコード結果の解釈用
 IRrecv* irrecv = nullptr;
 decode_results results;
-bool txEnabled = true;
 
 // 任意バイト列 (nbytes は 6 の倍数) を Bosch144 波形にして RMT 送信
 void encodeAndSend(const uint8_t* bytes, size_t nbytes) {
@@ -63,10 +62,7 @@ void begin(uint8_t txGpio, uint8_t rxPin) {
   irrecv->enableIRIn();
 }
 
-void setTxEnabled(bool enabled) { txEnabled = enabled; }
-
 void send(const AcState& s) {
-  if (!txEnabled) return;
   if (s.power) {
     encoder.setPower(true);
     encoder.setMode(s.mode);
@@ -84,13 +80,9 @@ void send(const AcState& s) {
   }
 }
 
-PollResult poll(AcState& out, RxDebugInfo* dbg) {
-  if (!irrecv || !irrecv->decode(&results)) return PollResult::None;
-  if (dbg) {
-    dbg->type = results.decode_type;
-    dbg->bits = results.bits;
-    dbg->overflow = results.overflow;
-  }
+bool poll(AcState& out) {
+  if (!irrecv || !irrecv->decode(&results)) return false;
+  bool updated = false;
   if (results.decode_type == decode_type_t::BOSCH144) {
     // 144bit(18B)=運転中, 96bit(12B)=電源OFF。電源はビット数で判定 (ベンダー非依存)。
     if (results.bits >= kBosch144Bits) {
@@ -102,11 +94,10 @@ PollResult poll(AcState& out, RxDebugInfo* dbg) {
     } else {
       out.power = false;
     }
-    irrecv->resume();
-    return PollResult::Bosch144;
+    updated = true;
   }
   irrecv->resume();
-  return PollResult::NonBosch144;
+  return updated;
 }
 
 }  // namespace AcIr
