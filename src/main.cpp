@@ -18,6 +18,7 @@ const char* kHostname = "toshiba-ac";  // http://toshiba-ac.local/
 const uint8_t kIrTxGpio = 4;
 const uint8_t kIrRxPin = 5;
 const bool kIrTxEnabled = true;        // 受信単体切り分け時は false にする
+const uint32_t kNoReceiveLogIntervalMs = 5000;
 
 WebServer server(80);
 AcState ac;  // 現在の状態 (Web と受信で共有)
@@ -155,8 +156,15 @@ void setup() {
 void loop() {
   static uint32_t lastRxMs = 0;
   static uint32_t lastNoRxLogMs = 0;
+  static bool rxWindowInitialized = false;
 
   server.handleClient();
+
+  if (!rxWindowInitialized) {
+    lastRxMs = millis();
+    lastNoRxLogMs = lastRxMs;
+    rxWindowInitialized = true;
+  }
 
   // 物理リモコン (または自分の送信) を受信して状態を同期
   AcIr::RxDebugInfo dbg;
@@ -172,7 +180,8 @@ void loop() {
   }
 
   uint32_t now = millis();
-  if (now - lastRxMs >= 5000 && now - lastNoRxLogMs >= 5000) {
+  if (now - lastRxMs >= kNoReceiveLogIntervalMs &&
+      now - lastNoRxLogMs >= kNoReceiveLogIntervalMs) {
     Serial.println("IR受信なし(直近5秒)");
     lastNoRxLogMs = now;
   }

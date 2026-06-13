@@ -7,7 +7,7 @@
 namespace {
 const rmt_channel_t kCh = RMT_CHANNEL_0;
 const uint8_t kVendorByte = 0xC2;   // 実機 RG10J5 のベンダーバイト (ライブラリ既定は 0xB2)
-const uint8_t kRxTimeoutMs = 90;    // AC 系は長めのフレームがあるため余裕を持たせる
+const uint8_t kRxTimeoutMs = 90;    // IRrecv timeout parameter is milliseconds.
 
 IRBosch144AC encoder(0);  // バイト列構築専用 (RMT で送るので GPIO は未使用)
 IRBosch144AC parser(0);   // 受信デコード結果の解釈用
