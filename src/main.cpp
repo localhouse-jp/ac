@@ -17,6 +17,7 @@
 const char* kHostname = "toshiba-ac";  // http://toshiba-ac.local/
 const uint8_t kIrTxGpio = 4;
 const uint8_t kIrRxPin = 5;
+const bool kIrTxEnabled = true;        // 受信単体切り分け時は false にする
 
 WebServer server(80);
 AcState ac;  // 現在の状態 (Web と受信で共有)
@@ -112,8 +113,12 @@ void handleSet() {
   // 温度/モード/風量を変えたら電源も入れる
   if (server.hasArg("mode") || server.hasArg("temp") || server.hasArg("fan")) ac.power = true;
 
-  AcIr::send(ac);
-  Serial.println("Web -> IR 送信");
+  if (kIrTxEnabled) {
+    AcIr::send(ac);
+    Serial.println("Web -> IR 送信");
+  } else {
+    Serial.println("Web 操作 (IR送信は無効化中)");
+  }
 
   server.sendHeader("Location", "/");  // PRG パターン
   server.send(303, "text/plain", "");
@@ -124,6 +129,8 @@ void setup() {
   delay(200);
 
   AcIr::begin(kIrTxGpio, kIrRxPin);
+  AcIr::setTxEnabled(kIrTxEnabled);
+  Serial.printf("IR送信: %s\n", kIrTxEnabled ? "有効" : "無効");
 
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(kHostname);
@@ -146,9 +153,27 @@ void setup() {
 }
 
 void loop() {
+  static uint32_t lastRxMs = 0;
+  static uint32_t lastNoRxLogMs = 0;
+
   server.handleClient();
 
   // 物理リモコン (または自分の送信) を受信して状態を同期
-  if (AcIr::poll(ac))
-    Serial.printf("IR 受信 -> 同期: power=%d mode=%d temp=%d\n", ac.power, ac.mode, ac.temp);
+  AcIr::RxDebugInfo dbg;
+  AcIr::PollResult pr = AcIr::poll(ac, &dbg);
+  if (pr == AcIr::PollResult::Bosch144) {
+    lastRxMs = millis();
+    Serial.printf("IR受信(BOSCH144) -> 同期: power=%d mode=%d temp=%d fan=%u bits=%u\n",
+                  ac.power, ac.mode, ac.temp, ac.fan, dbg.bits);
+  } else if (pr == AcIr::PollResult::NonBosch144) {
+    lastRxMs = millis();
+    Serial.printf("IR受信(非BOSCH144): type=%d bits=%u overflow=%d\n",
+                  (int)dbg.type, dbg.bits, dbg.overflow);
+  }
+
+  uint32_t now = millis();
+  if (now - lastRxMs >= 5000 && now - lastNoRxLogMs >= 5000) {
+    Serial.println("IR受信なし(直近5秒)");
+    lastNoRxLogMs = now;
+  }
 }
