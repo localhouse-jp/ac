@@ -25,81 +25,56 @@ AcState ac;  // 現在の状態 (Web と受信で共有)
 const uint16_t kFanSteps[] = {kBosch144Fan20, kBosch144Fan40, kBosch144Fan60,
                               kBosch144Fan80, kBosch144Fan100};
 
-String modeName(uint8_t m) {
-  switch (m) {
-    case kBosch144Auto: return "自動";
-    case kBosch144Cool: return "冷房";
-    case kBosch144Dry:  return "除湿";
-    case kBosch144Heat: return "暖房";
-    case kBosch144Fan:  return "送風";
-    default:            return "?";
-  }
-}
-
-String fanName(uint16_t f) {
-  if (f == kBosch144FanAuto || f == kBosch144FanAuto0) return "自動";
+// 風量コード -> UI インデックス(0:自動, 1..5)
+uint8_t fanIndex() {
+  if (ac.fan == kBosch144FanAuto || ac.fan == kBosch144FanAuto0) return 0;
   for (uint8_t i = 0; i < 5; i++)
-    if (f == kFanSteps[i]) return String((i + 1) * 20) + "%";
-  return "自動";
+    if (ac.fan == kFanSteps[i]) return i + 1;
+  return 0;
 }
 
-// ---- HTML ----
-String htmlPage() {
-  String h = F("<!DOCTYPE html><html lang='ja'><head><meta charset='utf-8'>"
-               "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-               "<title>東芝エアコン リモコン</title><style>"
-               "body{font-family:sans-serif;max-width:420px;margin:0 auto;padding:16px;background:#0f172a;color:#e2e8f0}"
-               "h1{font-size:1.3rem}.card{background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px}"
-               ".row{display:flex;align-items:center;justify-content:space-between;margin:10px 0}"
-               "a.btn{display:inline-block;background:#334155;color:#e2e8f0;border:none;border-radius:8px;"
-               "padding:10px 14px;font-size:1rem;text-decoration:none;cursor:pointer;margin:2px}"
-               "a.btn.on{background:#2563eb}.big{font-size:2rem;font-weight:bold}"
-               ".pw{background:#16a34a}.po{background:#dc2626}</style></head><body>");
-  h += F("<h1>東芝エアコン リモコン</h1>");
-
-  // 電源
-  h += "<div class='card'><div class='row'><span>電源</span><span class='big'>";
-  h += ac.power ? "ON" : "OFF";
-  h += "</span></div><div class='row'>";
-  h += "<a class='btn pw' href='/set?power=1'>ON</a>";
-  h += "<a class='btn po' href='/set?power=0'>OFF</a></div></div>";
-
-  // 運転モード
-  h += "<div class='card'><div class='row'><span>運転モード</span><b>" + modeName(ac.mode) + "</b></div><div>";
-  uint8_t modes[] = {kBosch144Auto, kBosch144Cool, kBosch144Dry, kBosch144Heat, kBosch144Fan};
-  for (uint8_t m : modes)
-    h += "<a class='btn" + String(ac.mode == m ? " on" : "") + "' href='/set?mode=" + String(m) + "'>" + modeName(m) + "</a>";
-  h += "</div></div>";
-
-  // 温度
-  h += "<div class='card'><div class='row'><span>温度</span><span class='big'>" + String(ac.temp) + "&deg;C</span></div><div class='row'>";
-  h += "<a class='btn' href='/set?temp=" + String(ac.temp - 1) + "'>&minus;</a>";
-  h += "<a class='btn' href='/set?temp=" + String(ac.temp + 1) + "'>&plus;</a></div></div>";
-
-  // 風量 (fan=0:自動, 1..5:20〜100%)
-  h += "<div class='card'><div class='row'><span>風量</span><b>" + fanName(ac.fan) + "</b></div><div>";
-  for (uint8_t i = 0; i <= 5; i++) {
-    uint16_t fcode = (i == 0) ? kBosch144FanAuto : kFanSteps[i - 1];
-    h += "<a class='btn" + String(ac.fan == fcode ? " on" : "") + "' href='/set?fan=" + String(i) + "'>" + fanName(fcode) + "</a>";
-  }
-  h += "</div></div>";
-
-  h += "<p style='opacity:.6;font-size:.8rem'>操作で IR 送信。物理リモコンの操作も反映されます。</p>";
-  // 受信同期: /state を監視し、状態が変わったら再読み込み
-  h += F("<script>let last='';setInterval(async()=>{try{"
-         "const t=await (await fetch('/state')).text();"
-         "if(last&&t!==last)location.reload();last=t;}catch(e){}},1500);</script>");
-  h += "</body></html>";
-  return h;
+// 現在状態を JSON で返す (fan は UI インデックス)
+String stateJson() {
+  return String("{\"power\":") + (ac.power ? 1 : 0) +
+         ",\"mode\":" + ac.mode + ",\"temp\":" + ac.temp +
+         ",\"fan\":" + fanIndex() + "}";
 }
 
-// 現在状態の短い署名 (変化検知用)
-String stateSig() {
-  return String(ac.power) + ":" + ac.mode + ":" + ac.temp + ":" + ac.fan;
-}
+// ---- HTML (初回のみ配信。以降は /set, /state の JSON で部分更新) ----
+const char kHtml[] PROGMEM = R"HTML(<!DOCTYPE html><html lang=ja><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>東芝エアコン リモコン</title><style>
+body{font-family:sans-serif;max-width:420px;margin:0 auto;padding:16px;background:#0f172a;color:#e2e8f0}
+h1{font-size:1.3rem}.card{background:#1e293b;border-radius:12px;padding:16px;margin-bottom:14px}
+.row{display:flex;align-items:center;justify-content:space-between;margin:10px 0}
+.btn{background:#334155;color:#e2e8f0;border:none;border-radius:8px;padding:10px 14px;font-size:1rem;cursor:pointer;margin:2px}
+.btn.on{background:#2563eb}.big{font-size:2rem;font-weight:bold}.pw{background:#16a34a}.po{background:#dc2626}
+</style></head><body>
+<h1>東芝エアコン リモコン</h1>
+<div class=card><div class=row><span>電源</span><span class=big id=pw>-</span></div>
+<div class=row><button class="btn pw" onclick="set('power',1)">ON</button>
+<button class="btn po" onclick="set('power',0)">OFF</button></div></div>
+<div class=card><div class=row><span>運転モード</span></div><div id=modes></div></div>
+<div class=card><div class=row><span>温度</span><span class=big id=temp>-</span></div>
+<div class=row><button class=btn onclick="set('temp',st.temp-1)">&minus;</button>
+<button class=btn onclick="set('temp',st.temp+1)">&plus;</button></div></div>
+<div class=card><div class=row><span>風量</span></div><div id=fans></div></div>
+<script>
+const M=[[5,'自動'],[0,'冷房'],[3,'除湿'],[6,'暖房'],[2,'送風']];
+const FN=['自動','20%','40%','60%','80%','100%'];
+let st={power:0,mode:0,temp:26,fan:0};
+function render(){
+pw.textContent=st.power?'ON':'OFF';temp.textContent=st.temp+'℃';
+modes.innerHTML=M.map(([c,n])=>`<button class="btn ${st.mode==c?'on':''}" onclick="set('mode',${c})">${n}</button>`).join('');
+fans.innerHTML=FN.map((n,i)=>`<button class="btn ${st.fan==i?'on':''}" onclick="set('fan',${i})">${n}</button>`).join('');}
+async function set(k,v){st=await(await fetch(`/set?${k}=${v}`)).json();render();}
+async function poll(){try{let s=await(await fetch('/state')).json();
+if(JSON.stringify(s)!=JSON.stringify(st)){st=s;render();}}catch(e){}}
+render();poll();setInterval(poll,1000);
+</script></body></html>)HTML";
 
-void handleRoot() { server.send(200, "text/html; charset=utf-8", htmlPage()); }
-void handleState() { server.send(200, "text/plain", stateSig()); }
+void handleRoot() { server.send_P(200, "text/html; charset=utf-8", kHtml); }
+void handleState() { server.send(200, "application/json", stateJson()); }
 
 void handleSet() {
   if (server.hasArg("power")) ac.power = server.arg("power").toInt() != 0;
@@ -114,9 +89,7 @@ void handleSet() {
 
   AcIr::send(ac);
   Serial.println("Web -> IR 送信");
-
-  server.sendHeader("Location", "/");  // PRG パターン
-  server.send(303, "text/plain", "");
+  server.send(200, "application/json", stateJson());  // 全ページ再読込せず JSON だけ返す
 }
 
 void setup() {
