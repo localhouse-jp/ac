@@ -15,7 +15,8 @@
 struct AcState {
   bool     power = true;
   uint8_t  mode  = kBosch144Cool;     // kBosch144 Cool/Dry/Auto/Heat/Fan
-  uint8_t  temp  = 26;                // 16..30 (℃)
+  uint8_t  temp  = 26;                // 16..30 (℃) 整数部
+  bool     half  = false;             // +0.5℃ (半度ビット)
   uint16_t fan   = kBosch144FanAuto;  // kBosch144Fan20..100 / FanAuto
 };
 

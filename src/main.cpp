@@ -33,10 +33,11 @@ uint8_t fanIndex() {
   return 0;
 }
 
-// 現在状態を JSON で返す (fan は UI インデックス)
+// 現在状態を JSON で返す (fan は UI インデックス, temp は 0.5 刻みの数値)
 String stateJson() {
+  String temp = String(ac.temp) + (ac.half ? ".5" : "");
   return String("{\"power\":") + (ac.power ? 1 : 0) +
-         ",\"mode\":" + ac.mode + ",\"temp\":" + ac.temp +
+         ",\"mode\":" + ac.mode + ",\"temp\":" + temp +
          ",\"fan\":" + fanIndex() + "}";
 }
 
@@ -56,8 +57,8 @@ h1{font-size:1.3rem}.card{background:#1e293b;border-radius:12px;padding:16px;mar
 <button class="btn po" onclick="set('power',0)">OFF</button></div></div>
 <div class=card><div class=row><span>運転モード</span></div><div id=modes></div></div>
 <div class=card><div class=row><span>温度</span><span class=big id=temp>-</span></div>
-<div class=row><button class=btn onclick="set('temp',st.temp-1)">&minus;</button>
-<button class=btn onclick="set('temp',st.temp+1)">&plus;</button></div></div>
+<div class=row><button class=btn onclick="set('temp',st.temp-0.5)">&minus;</button>
+<button class=btn onclick="set('temp',st.temp+0.5)">&plus;</button></div></div>
 <div class=card><div class=row><span>風量</span></div><div id=fans></div></div>
 <script>
 const M=[[5,'自動'],[0,'冷房'],[3,'除湿'],[6,'暖房'],[2,'送風']];
@@ -79,7 +80,11 @@ void handleState() { server.send(200, "application/json", stateJson()); }
 void handleSet() {
   if (server.hasArg("power")) ac.power = server.arg("power").toInt() != 0;
   if (server.hasArg("mode"))  ac.mode  = (uint8_t)server.arg("mode").toInt();
-  if (server.hasArg("temp"))  ac.temp  = constrain((int)server.arg("temp").toInt(), 16, 30);
+  if (server.hasArg("temp")) {
+    int half2 = constrain((int)(server.arg("temp").toFloat() * 2 + 0.5f), 32, 60);  // 0.5 刻み (16.0〜30.0)
+    ac.temp = half2 / 2;
+    ac.half = half2 & 1;
+  }
   if (server.hasArg("fan")) {
     int i = constrain((int)server.arg("fan").toInt(), 0, 5);
     ac.fan = (i == 0) ? kBosch144FanAuto : kFanSteps[i - 1];
@@ -123,5 +128,6 @@ void loop() {
 
   // 物理リモコン (または自分の送信) を受信して状態を同期
   if (AcIr::poll(ac))
-    Serial.printf("IR受信 -> 同期: power=%d mode=%d temp=%d\n", ac.power, ac.mode, ac.temp);
+    Serial.printf("IR受信 -> 同期: power=%d mode=%d temp=%d%s fan=%u\n",
+                  ac.power, ac.mode, ac.temp, ac.half ? ".5" : "", ac.fan);
 }
