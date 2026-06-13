@@ -11,7 +11,8 @@
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include "AcIr.h"
-#include "secrets.h"  // WIFI_SSID / WIFI_PASS (コミットしない)
+#include "AcMqtt.h"
+#include "secrets.h"  // WIFI_SSID / WIFI_PASS / MQTT_* (コミットしない)
 
 // ---- 設定 ----
 const char* kHostname = "toshiba-ac";  // http://toshiba-ac.local/
@@ -93,8 +94,16 @@ void handleSet() {
   if (server.hasArg("mode") || server.hasArg("temp") || server.hasArg("fan")) ac.power = true;
 
   AcIr::send(ac);
+  AcMqtt::publishState();  // Web 変更を HA/Apple Home に反映
   Serial.println("Web -> IR 送信");
   server.send(200, "application/json", stateJson());  // 全ページ再読込せず JSON だけ返す
+}
+
+// MQTT コマンドで ac が更新された後に呼ばれる: 実機反映 + 状態再 publish
+void onMqttCommand() {
+  AcIr::send(ac);
+  AcMqtt::publishState();
+  Serial.println("MQTT -> IR 送信");
 }
 
 void setup() {
@@ -121,13 +130,18 @@ void setup() {
   server.onNotFound([]() { server.send(404, "text/plain", "Not Found"); });
   server.begin();
   Serial.println("Web サーバ開始");
+
+  AcMqtt::begin(&ac, onMqttCommand);  // 実接続は loop で確立
 }
 
 void loop() {
   server.handleClient();
+  AcMqtt::loop();
 
   // 物理リモコン (または自分の送信) を受信して状態を同期
-  if (AcIr::poll(ac))
+  if (AcIr::poll(ac)) {
     Serial.printf("IR受信 -> 同期: power=%d mode=%d temp=%d%s fan=%u\n",
                   ac.power, ac.mode, ac.temp, ac.half ? ".5" : "", ac.fan);
+    AcMqtt::publishState();  // 物理リモコン操作も HA/Apple Home に反映
+  }
 }
