@@ -1,4 +1,6 @@
-# hometoshibaac
+| | Apple Home | Home Assistant | Web |
+| ---|---|---|---|
+| ![](./docs/01.jpeg) | ![](./docs/02_applehome.jpeg) | ![](./docs/03_homeassistant.jpeg) | ![](./docs/04_web.jpeg) |
 
 ESP32-C3 で東芝風エアコン（リモコン **RG10J5(B3H)/BGJ**、実体は **Bosch144** プロトコル）を
 Web / Home Assistant / Apple Home / 物理リモコン から操作・相互同期する。
