@@ -69,11 +69,12 @@ void encodeAndSend(const uint8_t* bytes, size_t nbytes) {
   rmt_write_items(kCh, items, n, true);
 }
 
-// 偶数バイトのベンダー識別を実機の 0xC2 に差し替え (奇数バイトはその反転)
+// ベンダー識別を実機の 0xC2 に差し替え。section1(byte0)とsection2(byte6)のみ。
+// section3(byte12=固定0xD5, byte13=mode/fan)は touch しない (壊すとON拒否される)。
 void patchVendor(uint8_t* raw, size_t nbytes) {
-  for (size_t i = 0; i + 1 < nbytes; i += kBosch144BytesPerSection) {
-    raw[i] = kVendorByte;
-    raw[i + 1] = (uint8_t)~kVendorByte;
+  raw[0] = kVendorByte; raw[1] = (uint8_t)~kVendorByte;
+  if (nbytes > kBosch144BytesPerSection) {
+    raw[6] = kVendorByte; raw[7] = (uint8_t)~kVendorByte;
   }
 }
 }  // namespace
