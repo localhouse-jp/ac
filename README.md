@@ -50,3 +50,72 @@ Apple Home は cool/heat/auto/off のみ（dry/fan_only/風量は HA/Web から�
 - 温度 0.5℃ は半度ビット `TempS4`(byte14 bit5)。電源 OFF は別プロトコル **Coolix `0xC27BE0`**。
 - 送信後 500ms は自己受信をミュート（至近の自己受信は化けるため）。
 - 新リモコン解析: `pio run -e capture -t upload` で Protocol/state hex をダンプ。
+
+
+---
+
+# Home Assistant Architecture
+
+```mermaid
+flowchart LR
+  user_home["User at home<br/>iPhone / PC"]
+  user_remote["User outside<br/>Browser / Home Assistant app"]
+  apple_home["Apple Home<br/>Home app / Siri"]
+  cloudflare["Cloudflare Tunnel<br/>Public access to Home Assistant"]
+
+  subgraph localhouse["LOCALHOUSE server<br/>(former Sakaisuji-Honmachi server)"]
+    komodo["Komodo<br/>Docker stack management"]
+
+    subgraph docker["Docker / Komodo stack"]
+      ha["Home Assistant<br/>UI / automations / entity management"]
+      mqtt["Mosquitto MQTT broker<br/>aircon topics"]
+      hkbridge["HomeKit Bridge<br/>Expose HA climate entity"]
+    end
+  end
+
+  subgraph esp["Air conditioner controller"]
+    esp32["ESP32-C3<br/>MQTT client / IR controller firmware"]
+    ir["IR transmitter module<br/>AliExpress IR hardware"]
+  end
+
+  ac["Toshiba air conditioner<br/>IR controlled"]
+
+  user_remote --> cloudflare
+  cloudflare --> ha
+
+  user_home --> ha
+  user_home --> apple_home
+  apple_home --> hkbridge
+  hkbridge --> ha
+
+  komodo --> ha
+  komodo --> mqtt
+
+  ha -->|"MQTT command/state"| mqtt
+  mqtt -->|"aircon/mode/set<br/>aircon/temperature/set"| esp32
+  esp32 -->|"aircon/*/state"| mqtt
+
+  esp32 --> ir
+  ir -->|"IR signal"| ac
+
+  classDef external fill:#eef6ff,stroke:#4a90e2,color:#111;
+  classDef server fill:#f7f7f7,stroke:#777,color:#111;
+  classDef service fill:#fff7e6,stroke:#d99000,color:#111;
+  classDef device fill:#f0fff4,stroke:#2f9e44,color:#111;
+
+  class user_home,user_remote,apple_home,cloudflare external;
+  class localhouse,komodo server;
+  class ha,mqtt,hkbridge service;
+  class esp32,ir,ac device;
+```
+
+## Notes
+
+- Home Assistant is exposed externally through Cloudflare Tunnel.
+- Komodo runs on the LOCALHOUSE server and manages the Docker stack.
+- Home Assistant, Mosquitto, and HomeKit Bridge run on the LOCALHOUSE server.
+- ESP32-C3 receives MQTT commands and sends IR signals through the AliExpress IR module.
+- Apple Home works through HomeKit Bridge on the local network.
+- Without a HomePod or Apple TV 4K home hub, Apple Home remote control is not available outside the local network.
+
+IR module reference: https://ja.aliexpress.com/item/1005007312108359.html
